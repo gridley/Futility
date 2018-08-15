@@ -10,7 +10,10 @@
 !>        monotone cubic splines are available.
 !>
 !> @par Module Dependencies
+!>  - @ref IntrType "IntrType": @copybrief IntrType
 !>  - @ref ParameterLists "ParameterLists": @copybrief ParameterLists
+!>  - @ref Strings "Strings": @copybrief Strings
+!>  - @ref ExceptionHandler "ExceptionHandler": @copybrief ExceptionHandler 
 !>
 !> @author Gavin Ridley
 !>    @date 8/8/2018
