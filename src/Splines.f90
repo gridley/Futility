@@ -30,15 +30,16 @@ MODULE Splines
   PUBLIC :: newSpline, Spline
 
   TYPE Spline
-    real(SRK), allocatable, dimension(:) :: knots  ! knots, i.e. ordinates.
-    real(SRK), allocatable, dimension(:) :: values ! f(x) at knot
-    real(SRK), allocatable, dimension(:) :: steps ! delta x of knot
-    real(SRK), allocatable, dimension(:) :: zi ! second derivative at knot. 
-    type(StringType) :: splineType
+    REAL(SRK), ALLOCATABLE, DIMENSION(:) :: knots  ! knots, i.e. ordinates.
+    REAL(SRK), ALLOCATABLE, DIMENSION(:) :: values ! f(x) at knot
+    REAL(SRK), ALLOCATABLE, DIMENSION(:) :: steps ! delta x of knot
+    REAL(SRK), ALLOCATABLE, DIMENSION(:) :: zi ! second derivative at knot. 
+    INTEGER(SIK) :: length ! number of knots in spline
+    TYPE(StringType) :: splineType
   contains
     procedure :: sample ! gets spline value at x=<arg>
     procedure :: clear ! clear out internal data
-    ! procedure :: solve ! find where spline is equal to some value
+    procedure :: solve ! find where spline is equal to some value
   ENDTYPE
 
   !> module-wide exception handler
@@ -62,7 +63,7 @@ MODULE Splines
     REAL(SRK), DIMENSION(:), INTENT(IN) :: datax, datay
     TYPE(Spline), INTENT(INOUT) :: splineOut
     TYPE(StringType) ::  splinetype
-    integer(SIK) :: i, length
+    integer(SIK) :: i
 
     !> Check if spline was already allocated. If so, clear it out.
     if (allocated(splineOut%knots)) then
@@ -71,25 +72,25 @@ MODULE Splines
 
     !> Allocate spline internal data, make sure length of interpolated
     !> and ordinate value arrays match.
-    length = size(datax)
-    allocate(splineOut%knots(length))
-    allocate(splineOut%values(length))
-    allocate(splineOut%steps(length-1))
+    splineOut%length = size(datax)
+    allocate(splineOut%knots(splineOut%length))
+    allocate(splineOut%values(splineOut%length))
+    allocate(splineOut%steps(splineOut%length-1))
 
     splineOut%knots = datax
     splineOut%values = datay
 
-    do i = 1, length-1
-      splineOut%steps(i) = splineOut%knots(i+1) - splineOut%knots(i)
-    enddo
-
-    if (size(datay) /= length) then
+    if (size(datay) /= splineOut%length) then
         call eSplines%raiseError(modname//'::'//myname// & 
               'Number of values and knots does not match.')
     endif
 
     !> ensure knots are strictly increasing
     call twoArraySorter(splineOut%knots, splineOut%values)
+
+    do i = 1, splineOut%length-1
+      splineOut%steps(i) = splineOut%knots(i+1) - splineOut%knots(i)
+    enddo
 
     !> get spline type to manufacture
     if (params%has('Spline->type')) then
@@ -111,15 +112,13 @@ MODULE Splines
   SUBROUTINE makenaturalcubic(self)
     CLASS(Spline), INTENT(INOUT) :: self
     REAL(SRK), DIMENSION(:), ALLOCATABLE :: bi, ui, vi ! work array
-    INTEGER(SIK) :: i, length
+    INTEGER(SIK) :: i
 
-    length = size(self%knots)
-
-    allocate(bi(length), ui(length), vi(length))
-    allocate(self%zi(length))
+    allocate(bi(self%length), ui(self%length), vi(self%length))
+    allocate(self%zi(self%length))
 
     !> "Steps" make up the sub and superdiagonals.
-    do i = 1, length-1
+    do i = 1, self%length-1
       bi(i) = 6.0_SRK / self%steps(i) * (self%values(i+1) - self%values(i))
     enddo
 
@@ -128,16 +127,16 @@ MODULE Splines
     vi(2) = bi(2) - bi(1)
 
     ! sweep forward:
-    do i = 3, length-1
+    do i = 3, self%length-1
       ui(i) = 2.0_SRK * (self%steps(i)+self%steps(i-1)) - &
               self%steps(i-1)**2/ui(i-1)
       vi(i) = bi(i) - bi(i-1) - self%steps(i-1) * vi(i-1) / ui(i-1)
     enddo
 
-    self%zi = [( 0.0_SRK, i = 1, length )]
+    self%zi = [( 0.0_SRK, i = 1, self%length )]
 
     ! sweep backward:
-    do i = length-1, 2, -1
+    do i = self%length-1, 2, -1
       self%zi(i) = (vi(i) - self%steps(i) * self%zi(i+1)) / ui(i)
     enddo
 
@@ -153,38 +152,36 @@ MODULE Splines
   !>    "Monotone Piecewise Cubic Interpolation", 1980
   SUBROUTINE makefritsch(self)
     CLASS(Spline), INTENT(INOUT) :: self
-    INTEGER(SIK) :: length
     REAL(SRK), DIMENSION(:), ALLOCATABLE :: slopes
     REAL(SRK) :: alpha, beta, tau, w1, w2
     INTEGER(SIK) :: i
-    length = size(self%knots)
 
     !> Values of spline's first derivative at each point.
-    allocate(self%zi(length))
+    allocate(self%zi(self%length))
 
     !> values of secant line derivatives
-    allocate(slopes(length-1))
+    allocate(slopes(self%length-1))
 
     !> set secant slopes
-    do i = 1, length-1
+    do i = 1, self%length-1
       slopes(i) = (self%values(i+1)-self%values(i)) / self%steps(i)
     enddo
 
     !> The method for determining tangent slope values used in
     !> Moler's "Numerical Computing with Matlab"
-    do i = 2, length-1
+    do i = 2, self%length-1
       w1 = 2.0_SRK * self%steps(i) + self%steps(i-1)
       w2 = self%steps(i) + 2.0_SRK * self%steps(i-1)
       self%zi(i) = (w1 / slopes(i) + w2 / slopes(i-1)) / (w1+w2)
       self%zi(i) = self%zi(i) ** (-1)
     enddo
     self%zi(1) = slopes(1)
-    self%zi(length) = slopes(length-1)
+    self%zi(self%length) = slopes(self%length-1)
 
     !> Loop over subintervals, adjust values of slope of the spline
     !> itself so that the parameters alpha and beta as defined in the
     !> above mentioned paper fall in the region of monotonicity.
-    do i = 1, length - 1
+    do i = 1, self%length - 1
       if (abs(slopes(i)) < epsilon(alpha)) then
           self%zi(i+1) = 0.0_SRK
       else
@@ -232,7 +229,7 @@ MODULE Splines
       else if (arr1(i) > arr1(i+1)) then
         !> Carry this entry back.
         incr = -1
-        do while (i /= 0 .and. arr1(i) < arr1(i+1))
+        do while (i /= 0 .and. arr1(i) > arr1(i+1))
           call swap2(arr1, arr2, i)
           i = i + incr
         enddo
@@ -306,6 +303,83 @@ MODULE Splines
     CLASS(Spline), INTENT(INOUT) :: self
     deallocate(self%knots, self%values, self%steps, self%zi)
   ENDSUBROUTINE clear
+
+  !> @brief Find where spline is equal to "rhs"
+  !>   i.e., find root of spline(x)-rhs = 0
+  !>   Uses bisection to start newton method off on a good guess
+  !> @param rhs - value to match spline to
+  FUNCTION solve(self, rhs) RESULT(root)
+    CLASS(Spline), INTENT(IN) :: self
+    REAL(SRK), INTENT(IN) :: rhs
+    CHARACTER(LEN=*), PARAMETER :: myname = 'solve'
+
+    ! fractional tolerance in root
+    REAL(SRK), PARAMETER :: fracdel_toler = 1e-10
+    REAL(SRK) :: root, guess1, fracdel, temp
+
+    ! used in bisection
+    INTEGER(SIK) :: loc1, loc2, loc3
+    LOGICAL(SBK) :: inleft, inright 
+
+    if (self%splinetype /= 'monotonecubic') then
+      call eSplines%raiseError(modname//'::'//myname//' Only monotone cubic ' &
+        // 'splines are guaranteed to have one root.') 
+    endif
+
+    ! Use bisection search to pinpoint root interval:
+    loc1 = 1_SIK
+    loc2 = self%length
+    loc3 = loc2 / 2 ! intentional integer divide
+    do
+      !> XOR may only be in GNU fortran... probably need some preprocessor
+      !> directive to define XOR if other compilers don't have it.
+      inleft = XOR(boolsign(self%values(loc1)-rhs), boolsign(self%values(loc3)-rhs))
+      inright = XOR(boolsign(self%values(loc2)-rhs), boolsign(self%values(loc3)-rhs))
+      if (inleft .AND. inright) then
+        call eSplines%raiseError(modname//'::'//myname//'Non-unique root ' &
+        // 'detected in solve.')
+      else if (inleft) then
+        loc2 = loc3
+        loc3 = (loc3 + loc1) / 2
+      else if (inright) then
+        loc1 = loc3
+        loc3 = (loc3 + loc2) / 2
+      else
+        call eSplines%raiseError(modname//'::'//myname//'WTF??')
+      endif
+
+      ! Check if bisection search can stop
+      if (loc1 == loc3 .or. loc2 == loc3 .or. loc1 == loc2) then
+        exit
+      endif
+    enddo
+
+    ! loc1 now contains the interval the root lies in.
+    ! Now just run secant method to get the root.
+    guess1 = self%knots(loc1)
+    root = self%knots(loc1+1)
+    fracdel = abs(guess1-root)/root
+    do while (fracdel > fracdel_toler)
+      temp = root
+      root = (guess1 * (self%sample(root)-rhs) - root * (self%sample(guess1)- &
+             rhs)) / (self%sample(root) - self%sample(guess1))
+      guess1 = temp
+      fracdel = abs(guess1-root)/root
+    enddo
+  ENDFUNCTION solve
+
+  !> @brief Return true if number of kind SRK is greater than
+  !>        zero. Used in bisection method to cut out need for a
+  !>        floating point multiply.
+  PURE FUNCTION boolsign(num) result(ispositive)
+    REAL(SRK), INTENT(IN) :: num
+    LOGICAL(SBK) :: ispositive
+    if (num > 0.0_SRK) then
+      ispositive = .true.
+    else
+      ispositive = .false.
+    endif
+  ENDFUNCTION boolsign
      
 
 ENDMODULE Splines
