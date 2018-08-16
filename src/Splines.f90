@@ -261,20 +261,49 @@ MODULE Splines
   ENDSUBROUTINE swap2
 
   FUNCTION sample(self, xval) RESULT(val)
+    CHARACTER(LEN=*), PARAMETER :: myname = 'sample'
     REAL(SRK), INTENT(IN) :: xval
     CLASS(Spline), INTENT(IN) :: self 
     REAL(SRK) :: val, c, b, a
-    INTEGER(SIK) :: i
+    INTEGER(SIK) :: i, loc1, loc2, loc3
+    LOGICAL(SBK) :: inleft, inright
 
     !> Step through subintervals until it's
     !> one step too far, then go back one.
-    do i = 1, size(self%steps)
-      if (xval - self%knots(i) <= 0.0_SRK) exit
+    !  do i = 1, size(self%steps)
+    !    if (xval - self%knots(i) <= 0.0_SRK) exit
+    !  enddo
+    !  i = i - 1
+
+    ! Use bisection search to pinpoint interval:
+    loc1 = 1_SIK
+    loc2 = self%length
+    loc3 = loc2 / 2 ! intentional integer divide
+    do
+      !> XOR may only be in GNU fortran... probably need some preprocessor
+      !> directive to define XOR if other compilers don't have it.
+      inleft = XOR(boolsign(self%knots(loc1)-xval), boolsign(self%knots(loc3)-xval))
+      inright = XOR(boolsign(self%knots(loc2)-xval), boolsign(self%knots(loc3)-xval))
+      if (inleft) then
+        loc2 = loc3
+        loc3 = (loc3 + loc1) / 2
+      else if (inright) then
+        loc1 = loc3
+        loc3 = (loc3 + loc2) / 2
+      else
+        call eSplines%raiseError(modname//'::'//myname//'WTF??')
+      endif
+
+      ! Check if bisection search can stop
+      if (loc1 == loc3 .or. loc2 == loc3 .or. loc1 == loc2) then
+        exit
+      endif
     enddo
-    i = i - 1
     
-    !> Correct guess on interval the first time?
-    if (i == 0) i = 1
+    i = loc1
+    
+    ! !> Correct guess on interval the first time?
+    ! if (i == 0) i = 1
 
     !> Evaluates a cubic polynomial in a segment with both values and
     !> second derivatives given on each side
