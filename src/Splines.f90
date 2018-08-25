@@ -260,7 +260,7 @@ MODULE Splines
     arr2(i) = work
   ENDSUBROUTINE swap2
 
-  FUNCTION sample(self, xval) RESULT(val)
+  PURE FUNCTION sample(self, xval) RESULT(val)
     CHARACTER(LEN=*), PARAMETER :: myname = 'sample'
     REAL(SRK), INTENT(IN) :: xval
     CLASS(Spline), INTENT(IN) :: self 
@@ -275,7 +275,7 @@ MODULE Splines
     !> it's common to only have smooth changes in the ordinate
     !> variable.
     !> TODO: show this actually speeds up the code
-    if (not(xval >= self%knots(i) .and. xval <= self%knots(i+1_SIK)))
+    if (.not. (xval >= self%knots(i) .and. xval <= self%knots(i+1_SIK))) then
       !> Step through subintervals until it's
       !> one step too far, then go back one.
       !  do i = 1, size(self%steps)
@@ -288,18 +288,14 @@ MODULE Splines
       loc2 = self%length
       loc3 = loc2 / 2 ! intentional integer divide
       do
-        !> XOR may only be in GNU fortran... probably need some preprocessor
-        !> directive to define XOR if other compilers don't have it.
-        inleft = XOR(boolsign(self%knots(loc1)-xval), boolsign(self%knots(loc3)-xval))
-        inright = XOR(boolsign(self%knots(loc2)-xval), boolsign(self%knots(loc3)-xval))
+        inleft = boolsign(self%knots(loc1)-xval) .neqv. boolsign(self%knots(loc3)-xval)
+        inright = boolsign(self%knots(loc2)-xval) .neqv. boolsign(self%knots(loc3)-xval)
         if (inleft) then
           loc2 = loc3
           loc3 = (loc3 + loc1) / 2
-        else if (inright) then
+        else 
           loc1 = loc3
           loc3 = (loc3 + loc2) / 2
-        else
-          call eSplines%raiseError(modname//'::'//myname//'WTF??')
         endif
 
         ! Check if bisection search can stop
@@ -344,7 +340,7 @@ MODULE Splines
   !>   i.e., find root of spline(x)-rhs = 0
   !>   Uses bisection to start newton method off on a good guess
   !> @param rhs - value to match spline to
-  FUNCTION solve(self, rhs) RESULT(root)
+  PURE FUNCTION solve(self, rhs) RESULT(root)
     CLASS(Spline), INTENT(IN) :: self
     REAL(SRK), INTENT(IN) :: rhs
     CHARACTER(LEN=*), PARAMETER :: myname = 'solve'
@@ -357,31 +353,26 @@ MODULE Splines
     INTEGER(SIK) :: loc1, loc2, loc3
     LOGICAL(SBK) :: inleft, inright 
 
-    if (self%splinetype /= 'monotonecubic') then
-      call eSplines%raiseError(modname//'::'//myname//' Only monotone cubic ' &
-        // 'splines are guaranteed to have one root.') 
-    endif
-
     ! Use bisection search to pinpoint root interval:
     loc1 = 1_SIK
     loc2 = self%length
     loc3 = loc2 / 2 ! intentional integer divide
     do
-      !> XOR may only be in GNU fortran... probably need some preprocessor
-      !> directive to define XOR if other compilers don't have it.
-      inleft = XOR(boolsign(self%values(loc1)-rhs), boolsign(self%values(loc3)-rhs))
-      inright = XOR(boolsign(self%values(loc2)-rhs), boolsign(self%values(loc3)-rhs))
+      inleft = boolsign(self%values(loc1)-rhs) .neqv. boolsign(self%values(loc3)-rhs)
+      inright = boolsign(self%values(loc2)-rhs) .neqv. boolsign(self%values(loc3)-rhs)
       if (inleft .AND. inright) then
-        call eSplines%raiseError(modname//'::'//myname//'Non-unique root ' &
-        // 'detected in solve.')
+        ! Commented out in favor of making this a pure function:
+        ! call eSplines%raiseError(modname//'::'//myname//'Non-unique root ' &
+        ! // 'detected in solve.')
+        ! Just pick one root:
+        loc2 = loc3
+        loc3 = (loc3 + loc1) / 2
       else if (inleft) then
         loc2 = loc3
         loc3 = (loc3 + loc1) / 2
-      else if (inright) then
+      else
         loc1 = loc3
         loc3 = (loc3 + loc2) / 2
-      else
-        call eSplines%raiseError(modname//'::'//myname//'WTF??')
       endif
 
       ! Check if bisection search can stop
