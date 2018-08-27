@@ -33,7 +33,7 @@ PROGRAM testSplines
   ! Just has to not throw any errors here.
   ! -----------------------------------------------------------------
   COMPONENT_TEST('Natural cubic spline construction')
-  call newSpline(knots, values, testspline, params)
+  testspline = Spline(knots, values, params)
 
   ! Spot check a few expected natural spline values:
   ! -----------------------------------------------------------------
@@ -50,7 +50,7 @@ PROGRAM testSplines
 
   CALL params%clear()
   CALL params%add('Spline->type', 'monotonecubic')
-  CALL newSpline(knots, values, testspline, params)
+  testspline = Spline(knots, values, params)
 
   ! spot-check value
   ASSERT(testspline%sample(10.0_SRK) .APPROXEQ. 10.451851851851851_SRK, 'PCHIP spot check')
@@ -74,7 +74,7 @@ PROGRAM testSplines
   values = [ 1.0_SRK, 0.0_SRK, 4.0_SRK, 16.0_SRK ]
   CALL params%clear()
   CALL params%add('Spline->type', 'naturalcubic')
-  call newSpline(knots, values, testspline, params)
+  testspline = Spline(knots, values, params)
   ASSERT(testspline%sample(5.5_SRK) .APPROXEQ. 4.3148148148148149_SRK, 'nat. cubic check at 5.5')
   ASSERT(testspline%sample(10.0_SRK) .APPROXEQ. 3.1851851851851851_SRK, 'nat. cubic check at 10.0)')
   ASSERT(testspline%sample(3.0_SRK) .APPROXEQ. 1.0_SRK, 'testspline%sample(1.)')

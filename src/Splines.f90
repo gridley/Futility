@@ -27,7 +27,7 @@ MODULE Splines
   IMPLICIT NONE
   PRIVATE
 
-  PUBLIC :: newSpline, Spline
+  PUBLIC :: Spline
 
   TYPE Spline
     REAL(SRK), ALLOCATABLE, DIMENSION(:) :: knots  ! knots, i.e. ordinates.
@@ -38,9 +38,15 @@ MODULE Splines
     TYPE(StringType) :: splineType
   contains
     procedure :: sample ! gets spline value at x=<arg>
+    procedure :: puresample ! sample, but pure.
     procedure :: clear ! clear out internal data
     procedure :: solve ! find where spline is equal to some value
   ENDTYPE
+
+  !> constructor function
+  INTERFACE Spline
+    MODULE PROCEDURE newSpline
+  ENDINTERFACE
 
   !> module-wide exception handler
   TYPE(ExceptionHandlerType), SAVE :: eSplines
@@ -54,42 +60,41 @@ MODULE Splines
   !> @brief Base subroutine to call for initializing splines.
   !> @param datax ordinates data that become spline knots
   !> @param datay values to be interpolated
-  !> @param splineOut Spline object where data is stored.
+  !> @param newSpline Spline object where data is stored.
   !> @param params ParameterList specifying the spline type.
-  SUBROUTINE newSpline(datax, datay, splineOut, params)
+  TYPE(Spline) FUNCTION newSpline(datax, datay, params)
     USE Strings
     CHARACTER(LEN=*), PARAMETER :: myname = 'newSpline'
     TYPE(ParamType), INTENT(IN) :: params
     REAL(SRK), DIMENSION(:), INTENT(IN) :: datax, datay
-    TYPE(Spline), INTENT(INOUT) :: splineOut
     TYPE(StringType) ::  splinetype
     integer(SIK) :: i
 
     !> Check if spline was already allocated. If so, clear it out.
-    if (allocated(splineOut%knots)) then
-        call splineOut%clear()
+    if (allocated(newSpline%knots)) then
+        call newSpline%clear()
     endif
 
     !> Allocate spline internal data, make sure length of interpolated
     !> and ordinate value arrays match.
-    splineOut%length = size(datax)
-    allocate(splineOut%knots(splineOut%length))
-    allocate(splineOut%values(splineOut%length))
-    allocate(splineOut%steps(splineOut%length-1))
+    newSpline%length = size(datax)
+    allocate(newSpline%knots(newSpline%length))
+    allocate(newSpline%values(newSpline%length))
+    allocate(newSpline%steps(newSpline%length-1))
 
-    splineOut%knots = datax
-    splineOut%values = datay
+    newSpline%knots = datax
+    newSpline%values = datay
 
-    if (size(datay) /= splineOut%length) then
+    if (size(datay) /= newSpline%length) then
         call eSplines%raiseError(modname//'::'//myname// & 
               'Number of values and knots does not match.')
     endif
 
     !> ensure knots are strictly increasing
-    call twoArraySorter(splineOut%knots, splineOut%values)
+    call twoArraySorter(newSpline%knots, newSpline%values)
 
-    do i = 1, splineOut%length-1
-      splineOut%steps(i) = splineOut%knots(i+1) - splineOut%knots(i)
+    do i = 1, newSpline%length-1
+      newSpline%steps(i) = newSpline%knots(i+1) - newSpline%knots(i)
     enddo
 
     !> get spline type to manufacture
@@ -97,15 +102,15 @@ MODULE Splines
       call params%get('Spline->type', splinetype)
 
       if (splinetype == 'naturalcubic') then
-        call makenaturalcubic(splineOut)
+        call makenaturalcubic(newSpline)
 
       else if (splinetype == 'monotonecubic') then
-        call makefritsch(splineOut)
+        call makefritsch(newSpline)
       else
         call eSplines%raiseError(modname//'::'//myname//' unknown spline type: '//splinetype)
       endif
     endif
-  ENDSUBROUTINE newSpline
+    ENDFUNCTION newSpline
 
   !> Implementation of the cubic splines algorithm in Kincaid and Cheney's
   !> "Numerical Analysis". Amounts to solving a tridiagonal system.
@@ -260,7 +265,13 @@ MODULE Splines
     arr2(i) = work
   ENDSUBROUTINE swap2
 
-  PURE FUNCTION sample(self, xval) RESULT(val)
+  !> @brief sample the spline at the prescribed ordinate value.
+  !> To speed up the search for which interval the ordinate lies in
+  !> The last interval index gets saved since it's anticipated that,
+  !> due to the physics-oriented nature of this code, the same interval
+  !> will likely be sampled several times before transitioning to the
+  !> next interval.
+  FUNCTION sample(self, xval) RESULT(val)
     CHARACTER(LEN=*), PARAMETER :: myname = 'sample'
     REAL(SRK), INTENT(IN) :: xval
     CLASS(Spline), INTENT(IN) :: self 
@@ -330,6 +341,69 @@ MODULE Splines
     endif
   ENDFUNCTION sample
 
+  !> @brief like sample(x), but without the saving of the interval that
+  !> was just used. Allows use in concurrent do statements.
+  PURE FUNCTION puresample(self, xval) RESULT(val)
+    CHARACTER(LEN=*), PARAMETER :: myname = 'sample'
+    REAL(SRK), INTENT(IN) :: xval
+    CLASS(Spline), INTENT(IN) :: self 
+    REAL(SRK) :: val, c, b, a
+    INTEGER(SIK) :: loc1, loc2, loc3
+    LOGICAL(SBK) :: inleft, inright
+    INTEGER(SIK) :: i
+
+      !> Step through subintervals until it's
+      !> one step too far, then go back one.
+      !  do i = 1, size(self%steps)
+      !    if (xval - self%knots(i) <= 0.0_SRK) exit
+      !  enddo
+      !  i = i - 1
+      ! Use bisection search to pinpoint interval:
+      loc1 = 1_SIK
+      loc2 = self%length
+      loc3 = loc2 / 2 ! intentional integer divide
+      do
+        inleft = boolsign(self%knots(loc1)-xval) .neqv. boolsign(self%knots(loc3)-xval)
+        inright = boolsign(self%knots(loc2)-xval) .neqv. boolsign(self%knots(loc3)-xval)
+        if (inleft) then
+          loc2 = loc3
+          loc3 = (loc3 + loc1) / 2
+        else 
+          loc1 = loc3
+          loc3 = (loc3 + loc2) / 2
+        endif
+
+        ! Check if bisection search can stop
+        if (loc1 == loc3 .or. loc2 == loc3 .or. loc1 == loc2) then
+          exit
+        endif
+      enddo
+      
+      i = loc1
+    
+
+    !> Evaluates a cubic polynomial in a segment with both values and
+    !> second derivatives given on each side
+    if (self%splinetype == 'naturalcubic') then
+      a = 1.0_SRK / 6.0_SRK / self%steps(i) * (self%zi(i+1)-self%zi(i))
+      b = self%zi(i) / 2.0_SRK
+      c = -self%steps(i) / 6.0_SRK * self%zi(i+1) - self%steps(i) / 3.0_SRK &
+          * self%zi(i) + 1.0_SRK / self%steps(i) * &
+          (self%values(i+1)-self%values(i))
+      val = self%values(i) + (xval - self%knots(i)) * ( c +  &
+             (xval-self%knots(i))*(b+(xval-self%knots(i))*a))
+
+    !> Evaluates a cubic polynomial with both values and first derivatives
+    !> defined on each side.
+    else if (self%splinetype == 'monotonecubic') then
+      a = (xval - self%knots(i)) / self%steps(i)
+      val = (2.0_SRK*a**3 - 3._SRK*a**2 + 1.0_SRK) * self%values(i)
+      val = val + (a**3-2._SRK*a**2+a) * self%zi(i) * self%steps(i)
+      val = val + (-2._SRK * a**3 + 3._SRK * a**2) * self%values(i+1)
+      val = val + (a**3 - a**2) * self%zi(i+1) * self%steps(i)
+    endif
+  ENDFUNCTION puresample
+
   !> Clear internal allocatable arrays
   SUBROUTINE clear(self)
     CLASS(Spline), INTENT(INOUT) :: self
@@ -388,8 +462,8 @@ MODULE Splines
     fracdel = abs(guess1-root)/root
     do while (fracdel > fracdel_toler)
       temp = root
-      root = (guess1 * (self%sample(root)-rhs) - root * (self%sample(guess1)- &
-             rhs)) / (self%sample(root) - self%sample(guess1))
+      root = (guess1 * (self%puresample(root)-rhs) - root * (self%puresample(guess1)- &
+             rhs)) / (self%puresample(root) - self%puresample(guess1))
       guess1 = temp
       fracdel = abs(guess1-root)/root
     enddo
