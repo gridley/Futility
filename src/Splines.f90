@@ -15,6 +15,10 @@
 !>  - @ref Strings "Strings": @copybrief Strings
 !>  - @ref ExceptionHandler "ExceptionHandler": @copybrief ExceptionHandler 
 !>
+!> TODO:
+!>   Make the derivative sampling function cleaner. Probably should go in its
+!>   own function.
+!>
 !> @author Gavin Ridley
 !>    @date 8/8/2018
 !++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++!
@@ -343,10 +347,14 @@ MODULE Splines
 
   !> @brief like sample(x), but without the saving of the interval that
   !> was just used. Allows use in concurrent do statements.
-  PURE FUNCTION puresample(self, xval) RESULT(val)
+  !>
+  !> If "der" is provided as an integer, the first derivative of the spline
+  !> gets returned.
+  PURE FUNCTION puresample(self, xval, der) RESULT(val)
     CHARACTER(LEN=*), PARAMETER :: myname = 'sample'
     REAL(SRK), INTENT(IN) :: xval
     CLASS(Spline), INTENT(IN) :: self 
+    INTEGER(SIK), INTENT(IN), OPTIONAL :: der
     REAL(SRK) :: val, c, b, a
     INTEGER(SIK) :: loc1, loc2, loc3
     LOGICAL(SBK) :: inleft, inright
@@ -380,27 +388,41 @@ MODULE Splines
       enddo
       
       i = loc1
-    
 
     !> Evaluates a cubic polynomial in a segment with both values and
     !> second derivatives given on each side
     if (self%splinetype == 'naturalcubic') then
-      a = 1.0_SRK / 6.0_SRK / self%steps(i) * (self%zi(i+1)-self%zi(i))
-      b = self%zi(i) / 2.0_SRK
-      c = -self%steps(i) / 6.0_SRK * self%zi(i+1) - self%steps(i) / 3.0_SRK &
-          * self%zi(i) + 1.0_SRK / self%steps(i) * &
-          (self%values(i+1)-self%values(i))
-      val = self%values(i) + (xval - self%knots(i)) * ( c +  &
-             (xval-self%knots(i))*(b+(xval-self%knots(i))*a))
-
+      if (present(der)) then
+        !> Can't throw errors in the pure version. Return -1.
+        !> I don't have these derivatives coded in since theyre unused at the moment.
+        val = -1.0
+      else
+        a = 1.0_SRK / 6.0_SRK / self%steps(i) * (self%zi(i+1)-self%zi(i))
+        b = self%zi(i) / 2.0_SRK
+        c = -self%steps(i) / 6.0_SRK * self%zi(i+1) - self%steps(i) / 3.0_SRK &
+            * self%zi(i) + 1.0_SRK / self%steps(i) * &
+            (self%values(i+1)-self%values(i))
+        val = self%values(i) + (xval - self%knots(i)) * ( c +  &
+               (xval-self%knots(i))*(b+(xval-self%knots(i))*a))
+       endif
     !> Evaluates a cubic polynomial with both values and first derivatives
     !> defined on each side.
     else if (self%splinetype == 'monotonecubic') then
-      a = (xval - self%knots(i)) / self%steps(i)
-      val = (2.0_SRK*a**3 - 3._SRK*a**2 + 1.0_SRK) * self%values(i)
-      val = val + (a**3-2._SRK*a**2+a) * self%zi(i) * self%steps(i)
-      val = val + (-2._SRK * a**3 + 3._SRK * a**2) * self%values(i+1)
-      val = val + (a**3 - a**2) * self%zi(i+1) * self%steps(i)
+      if (.not. present(der)) then
+        a = (xval - self%knots(i)) / self%steps(i)
+        val = (2.0_SRK*a**3 - 3._SRK*a**2 + 1.0_SRK) * self%values(i)
+        val = val + (a**3-2._SRK*a**2+a) * self%zi(i) * self%steps(i)
+        val = val + (-2._SRK * a**3 + 3._SRK * a**2) * self%values(i+1)
+        val = val + (a**3 - a**2) * self%zi(i+1) * self%steps(i)
+      else
+        !> Return the derivative of the spline
+        a = (xval - self%knots(i)) / self%steps(i)
+        val = (6.0_SRK * a**2 - 6.0_SRK * a) * self%values(i)
+        val = val + (3.0_SRK * a**2 - 4.0_SRK * a + 1.0_SRK) * self%zi(i) * self%steps(i)
+        val = val + (-6.0_SRK * a**2 + 6.0_SRK * a) * self%values(i+1)
+        val = val + (3.0_SRK * a**2 - 2.0_SRK * a) * self%zi(i+1) * self%steps(i)
+        val = val / self%steps(i)
+      endif
     endif
   ENDFUNCTION puresample
 
